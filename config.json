@@ -1,0 +1,20 @@
+{
+    "surface_segmentation_model_swin":{
+        "config_path":"models/surface/swin/mask_rcnn_swin-s-p4-w7_fpn_fp16_ms-crop-3x_swin.py",
+        "checkpoint_path":"models/surface/swin/epoch_36.pth"
+    },
+     "surface_segmentation_model_n2xt":{
+        "config_path":"models/surface/n2xt/cascade_mask_rcnn_convnext-t_p4_w7_fpn_giou_4conv1f_fp16_ms-crop_3x_barrier.py",
+        "checkpoint_path":"models/surface/n2xt/epoch_15.pth"
+    },
+    "yolo":{
+        "checkpoint_path":"models/obstacles/yolo/best_mod_220809.pt"
+    },
+    "depth_estimation_model":{
+        "checkpoint_path":"models/depth/best_model_kitti.ckpt"
+    },
+    "core":{
+        "language":"Korean",
+        "multi_gpu":"False"
+    }
+}

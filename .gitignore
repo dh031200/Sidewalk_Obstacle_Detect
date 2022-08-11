@@ -6,8 +6,21 @@ __pycache__/
 # C extensions
 *.so
 
+# Pretrained model
+*.pth
+*.pt
+*.ckpt
+
+# Videos
+*.mp4
+*.MP4
+
 # Distribution / packaging
+.idea/
 .Python
+result/
+results/
+runs/
 build/
 develop-eggs/
 dist/
