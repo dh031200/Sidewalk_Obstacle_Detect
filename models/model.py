@@ -86,10 +86,10 @@ class Model:
 def cuda_checker(dual_gpu):
     if torch.cuda.is_available():
         if dual_gpu:
-            device_1, device_2, device_3 = 'cuda:1', 'cuda:0', 'cuda:1'
+            device_1, device_2, device_3 = torch.device('cuda:1'), torch.device('cuda:0'), torch.device('cuda:1')
             print('** Using cuda : ', torch.cuda.get_device_name(0), ', ', torch.cuda.get_device_name(1), '**')
         else:
-            device_1 = device_2 = device_3 = 'cuda:0'
+            device_1 = device_2 = device_3 = torch.device('cuda:0')
             print('** Using cuda : ', torch.cuda.get_device_name(0), '**')
     else:
         device_1 = device_2 = device_3 = 'cpu'

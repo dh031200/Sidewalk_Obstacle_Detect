@@ -5,6 +5,7 @@ import numpy as np
 import sys
 import cv2
 
+
 class Surface_tracker:
     def __init__(self, width, height, disappear_limit=0):
         self.width = width
