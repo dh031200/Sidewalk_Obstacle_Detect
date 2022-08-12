@@ -1,5 +1,5 @@
 # Sidewalk_Obstacle_Detect
-Detect sidewalk obstacles with Object detection, Object tracking, Instance segmentation and depth estimation    
+Detect sidewalk obstacles with Object detection, Instance segmentation and  Object tracking with Depth estimation 
 
 # Demo
 Label structure : {TrackedID_Class_Depth}    
