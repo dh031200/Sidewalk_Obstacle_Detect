@@ -13,13 +13,13 @@ TEXT_THICKNESS = 1
 def gen_colors(num_colors):
     import random
     import colorsys
-
+    num_colors -= 1
     hsvs = [[float(x) / num_colors, 1., 0.7] for x in range(num_colors)]
     random.seed(1234)
     random.shuffle(hsvs)
     rgbs = list(map(lambda x: list(colorsys.hsv_to_rgb(*x)), hsvs))
     bgrs = [(int(rgb[2] * 255), int(rgb[1] * 255), int(rgb[0] * 255))
-            for rgb in rgbs]
+            for rgb in rgbs] + [(0, 0, 255)]
     return bgrs
 
 

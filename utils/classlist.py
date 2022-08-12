@@ -6,7 +6,8 @@ OD_CLASSES_LIST = ['barricade', 'beverage_desk', 'beverage_vending_machine', 'bi
                    'carrier', 'cat', 'chair', 'dog', 'door_normal', 'fire_hydrant', 'kiosk', 'lift', 'mailbox',
                    'motorcycle', 'movable_signage', 'parking_meter', 'person', 'pole', 'potted_plant',
                    'power_controller', 'resting_place_roof', 'scooter', 'stop', 'stroller', 'table', 'traffic_light',
-                   'traffic_light_controller', 'traffic_sign', 'trash_can', 'tree_trunk', 'truck', 'wheelchair']
+                   'traffic_light_controller', 'traffic_sign', 'trash_can', 'tree_trunk', 'truck', 'wheelchair',
+                   'unstable']
 
 
 def get_class_name(num):
