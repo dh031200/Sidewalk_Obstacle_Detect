@@ -3,17 +3,20 @@ from collections import deque
 import os
 import os.path as osp
 import copy
+
+# import scipy.spatial.distance
 import torch
 import torch.nn.functional as F
-
+from scipy.spatial.distance import cdist
 from .kalman_filter import KalmanFilter
 from tracker import matching
 from .basetrack import BaseTrack, TrackState
 
+
 class STrack(BaseTrack):
     shared_kalman = KalmanFilter()
-    def __init__(self, tlwh, score, clss):
 
+    def __init__(self, tlwh, score, clss, depth):
         # wait activate
         self._tlwh = np.asarray(tlwh, dtype=np.float)
         self.kalman_filter = None
@@ -22,7 +25,11 @@ class STrack(BaseTrack):
 
         self.score = score
         self.tracklet_len = 0
+        self.depth = depth
+        self.clss_pool = np.full(15, 35)
+        self.n = -1
         self.clss = int(clss)
+        self.live_frame = 0
 
     def predict(self):
         mean_state = self.mean.copy()
@@ -42,6 +49,9 @@ class STrack(BaseTrack):
             for i, (mean, cov) in enumerate(zip(multi_mean, multi_covariance)):
                 stracks[i].mean = mean
                 stracks[i].covariance = cov
+            #     print(f'stracks[{i}].mean: {stracks[i].mean}')
+            #     print(f'stracks[{i}].covariance: {stracks[i].covariance}')
+            # print(f'stracks:{stracks}')
 
     def activate(self, kalman_filter, frame_id):
         """Start a new tracklet"""
@@ -68,6 +78,10 @@ class STrack(BaseTrack):
         if new_id:
             self.track_id = self.next_id()
         self.score = new_track.score
+        self.depth = new_track.depth
+        self.n = (self.n + 1) % 15
+        self.clss_pool[self.n] = new_track.clss
+        self.clss = np.bincount(self.clss_pool).argmax()
 
     def update(self, new_track, frame_id):
         """
@@ -87,6 +101,13 @@ class STrack(BaseTrack):
         self.is_activated = True
 
         self.score = new_track.score
+        self.depth = new_track.depth
+        self.n = (self.n + 1) % 15
+        self.clss_pool[self.n] = new_track.clss
+        self.clss = np.bincount(self.clss_pool).argmax()
+
+        # if self.clss != 35:
+        #     self.track_id = self.next_id()
 
     @property
     # @jit(nopython=True)
@@ -148,10 +169,13 @@ class BYTETracker(object):
         self.tracked_stracks = []  # type: list[STrack]
         self.lost_stracks = []  # type: list[STrack]
         self.removed_stracks = []  # type: list[STrack]
+        self.stable_tracked_strackes = []  # type: # list[STrack]
+
+        # self.stable_id = 0
 
         self.frame_id = 0
         self.args = args
-        #self.det_thresh = args.track_thresh
+        # self.det_thresh = args.track_thresh
         self.det_thresh = args.track_thresh + 0.1
         self.buffer_size = int(frame_rate / 30.0 * args.track_buffer)
         self.max_time_lost = self.buffer_size
@@ -164,15 +188,19 @@ class BYTETracker(object):
         lost_stracks = []
         removed_stracks = []
         clsses = None
+        depths = None
 
         if output_results.shape[1] == 5:
             scores = output_results[:, 4]
             bboxes = output_results[:, :4]
         else:
             output_results = output_results.cpu().numpy()
-            scores = output_results[:, 4] * output_results[:, 5]
+            scores = output_results[:, 4] * output_results[:, 5] * (1 - output_results[:, 6] / 255)
+            # scores = output_results[:, 4] * output_results[:, 5]
             bboxes = output_results[:, :4]  # x1y1x2y2
             clsses = output_results[:, 5]
+            # scores = 1 - output_results[:, 6]/255
+            depths = output_results[:, 6]
         img_h, img_w = img_info[0], img_info[1]
         scale = min(img_size[0] / float(img_h), img_size[1] / float(img_w))
         bboxes /= scale
@@ -183,14 +211,16 @@ class BYTETracker(object):
 
         inds_second = np.logical_and(inds_low, inds_high)
         dets_second = bboxes[inds_second]
-        dets = bboxes[remain_inds]
-        scores_keep = scores[remain_inds]
+        depths_second = depths[inds_second]
         scores_second = scores[inds_second]
+        dets = bboxes[remain_inds]
+        depths_keep = depths[remain_inds]
+        scores_keep = scores[remain_inds]
 
         if len(dets) > 0:
             '''Detections'''
-            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, c) for
-                          (tlbr, s, c) in zip(dets, scores_keep, clsses)]
+            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, c, d) for
+                          (tlbr, s, c, d) in zip(dets, scores_keep, clsses, depths_keep)]
         else:
             detections = []
 
@@ -210,13 +240,60 @@ class BYTETracker(object):
         dists = matching.iou_distance(strack_pool, detections)
         if not self.args.mot20:
             dists = matching.fuse_score(dists, detections)
+        # print(f'dists: {dists}')
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
+        # print(f'u_track:{u_track}')
+        # print(f'u_detection:{u_detection}')
+        # print(f'matches:{matches}')
+        # print('-----------------------------------------------')
+        u_track = list(u_track)
+        u_detection = list(u_detection)
+        class_filtered_matches = []
+        for itracked, idet in matches:
+            track = strack_pool[itracked]
+            det = detections[idet]
+            # print(f'track.clss:{track.clss}')
+            # print(f'det.clss:{det.clss}')
+            if track.clss != 35:
+                if track.clss == det.clss:
+                    class_filtered_matches.append([itracked, idet])
+                else:
+                    u_track.append(itracked)
+                    u_detection.append(idet)
+            else:
+                class_filtered_matches.append([itracked, idet])
+
+        matches = class_filtered_matches
+        # print(f'u_track:{u_track}')
+        # print(f'u_detection:{u_detection}')
+        # print(f'matches:{matches}')
+        # print('------------------------------------------------')
+
+        depth_filtered_matches = []
+        for itracked, idet in matches:
+            track = strack_pool[itracked]
+            det = detections[idet]
+            # print(f'track.depth:{track.depth}')
+            # print(f'det.depth:{det.depth}')
+            if abs(track.depth - det.depth) < 20:
+                depth_filtered_matches.append([itracked, idet])
+            else:
+                u_track.append(itracked)
+                u_detection.append(idet)
+        matches = depth_filtered_matches
+        u_track = np.array(u_track)
+        u_detection = np.array(u_detection)
+
+        # print(f'u_track:{u_track}')
+        # print(f'u_detection:{u_detection}')
+        # print(f'matches:{matches}')
+        # print('=======================================================')
 
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
             if track.state == TrackState.Tracked:
-                track.update(detections[idet], self.frame_id)
+                track.update(det, self.frame_id)
                 activated_starcks.append(track)
             else:
                 track.re_activate(det, self.frame_id, new_id=False)
@@ -226,8 +303,8 @@ class BYTETracker(object):
         # association the untrack to the low score detections
         if len(dets_second) > 0:
             '''Detections'''
-            detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s) for
-                          (tlbr, s) in zip(dets_second, scores_second)]
+            detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s, c, d) for
+                                 (tlbr, s, c, d) in zip(dets_second, scores_second, clsses, depths_second)]
         else:
             detections_second = []
         r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
@@ -287,9 +364,169 @@ class BYTETracker(object):
         self.removed_stracks.extend(removed_stracks)
         self.tracked_stracks, self.lost_stracks = remove_duplicate_stracks(self.tracked_stracks, self.lost_stracks)
         # get scores of lost tracks
+        # self.stable_tracked_strackes = [track for track in self.tracked_stracks if track.clss != 35]
+
         output_stracks = [track for track in self.tracked_stracks if track.is_activated]
 
         return output_stracks
+
+
+class StableTrack:
+    def __init__(self, tlbr, score, clss, depth, id):
+        self.id = id
+        self.count = 0
+        self.tlbr = tlbr
+        self.score = score
+        self.clss = clss
+        self.depth = depth
+        self.disappear = 0
+        self.appeared = 0
+        self.is_alive = True
+        self.img_save = False
+
+    def update(self, new_track):
+        self.tlbr = new_track.tlbr
+        self.score = new_track.score
+        self.depth = new_track.depth
+        self.appeared += 1
+        self.disappear = 0
+
+    def __repr__(self):
+        return 'OT_{:4s} ({:4d})'.format(str(self.id), self.appeared)
+
+
+class StableTracker:
+    def __init__(self):
+        self.stable_stracks = []  # type: list[StableTrack]
+        self.stable_id = 0
+        self.stable_cnt = 0
+
+    def update(self, online_targets):
+        if self.stable_cnt:
+            # for target in online_targets:
+            live_tracks = []
+            clsses = set(t.clss for t in online_targets)
+            for track in self.stable_stracks:
+                if track.is_alive:
+                    live_tracks.append(track)
+                    clsses.add(track.clss)
+            # live_tracks = [t for t in self.stable_stracks if t.is_alive]
+            print(clsses)
+            # candidate_each_class = []
+            for c in clsses:
+                print(f'current class : {c}')
+                lt = [t for t in live_tracks if t.clss == c]
+                ot = [t for t in online_targets if t.clss == c]
+                ltsd = [[t.score, t.depth, (t.tlbr[0] + t.tlbr[2]) // 2, (t.tlbr[1] + t.tlbr[3]) // 2] for t in lt]
+                otsd = [[t.score, t.depth, (t.tlbr[0] + t.tlbr[2]) // 2, (t.tlbr[1] + t.tlbr[3]) // 2] for t in ot]
+
+                print(f'lt: {lt}')
+                print(f'ot: {ot}')
+
+                if not len(lt):
+                    print('No lt')
+                    for target in ot:
+                        self.stable_cnt += 1
+                        self.stable_id += 1
+                        self.stable_stracks.append(
+                            StableTrack(target.tlwh, target.score, target.clss, target.depth, self.stable_id))
+
+                if not len(ot):
+                    print('No ot')
+                    for track in lt:
+                        track.disappear += 1
+                        if track.disappear > 30:  # disappear limit
+                            track.is_alive = False
+                            self.stable_cnt -= 1
+
+                if not len(lt) or not len(ot):
+                    continue
+
+                D = cdist(ltsd, otsd)
+
+                rows = D.min(axis=1).argsort()
+                cols = D.argmin(axis=1)[rows]
+
+                print(f'D.min() : {D.min()}')
+                print(f'D.max() : {D.max()}')
+
+                usedRows = set()
+                usedCols = set()
+
+                for row, col in zip(rows, cols):
+                    if row in usedRows or col in usedCols:
+                        continue
+
+                    # print(f'D : {D}')
+
+                    print(f'D[row]:{D[row]}')
+                    print(f'D[row][col] : {D[row][col]}')
+                    # if D[row][col] > 600:
+                    #     continue
+                    # print(f'D[col]:{D[col]}')
+
+                    lt[row].update(ot[col])
+
+                    usedRows.add(row)
+                    usedCols.add(col)
+
+                unusedRows = set(range(0, D.shape[0])).difference(usedRows)
+                unusedCols = set(range(0, D.shape[1])).difference(usedCols)
+
+                if D.shape[0] >= D.shape[1]:
+                    for row in unusedRows:
+                        print(f'{lt[row]} is disappeared {lt[row].disappear}')
+                        lt[row].disappear += 1
+                        if lt[row].disappear > 30:  # disappear limit
+                            lt[row].is_alive = False
+                            self.stable_cnt -= 1
+                else:
+                    for col in unusedCols:
+                        target = ot[col]
+                        self.stable_cnt += 1
+                        self.stable_id += 1
+                        self.stable_stracks.append(
+                            StableTrack(target.tlwh, target.score, target.clss, target.depth, self.stable_id))
+                        # self.register(b_data[col], s_data[col], cls_data[col], conf_data[col])
+
+            ######################## Matching...
+
+
+
+            # dists = matching.iou_distance(live_tracks, online_targets)
+            # dists = matching.fuse_score(dists, online_targets)
+            # matches, u_track, u_detection = matching.linear_assignment(dists, thresh=0.1)
+            # print(f'matches: {matches}')
+            # print(f'u_track: {u_track}')
+            # print(f'u_detection: {u_detection}')
+
+            # for itracked, idet in matches:
+            #     track = self.stable_stracks[itracked]
+            #     det = online_targets[idet]
+            #     track.update(det)
+            #
+            # for itrack in u_track:
+            #     track = self.stable_stracks[itrack]
+            #     track.disappear += 1
+            #     if track.disappear > 30:
+            #         track.is_alive = False
+            #         self.stable_cnt -= 1
+            #
+            # for idet in u_detection:
+            #     target = online_targets[idet]
+            #     self.stable_cnt += 1
+            #     self.stable_id += 1
+            #     self.stable_stracks.append(
+            #         StableTrack(target.tlwh, target.score, target.clss, target.depth, self.stable_id))
+
+        else:
+            for target in online_targets:
+                self.stable_cnt += 1
+                self.stable_id += 1
+                self.stable_stracks.append(
+                    StableTrack(target.tlwh, target.score, target.clss, target.depth, self.stable_id))
+
+        return [i for i in self.stable_stracks if i.is_alive and i.disappear == 0]
 
 
 def joint_stracks(tlista, tlistb):

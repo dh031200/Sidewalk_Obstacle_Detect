@@ -8,7 +8,7 @@
         "checkpoint_path":"models/surface/n2xt/epoch_15.pth"
     },
     "yolo":{
-        "checkpoint_path":"models/obstacles/yolo/best_mod_220809.pt"
+        "checkpoint_path":"models/obstacles/yolo/v4_best_epoch_26.pt"
     },
     "depth_estimation_model":{
         "checkpoint_path":"models/depth/best_model_kitti.ckpt"
