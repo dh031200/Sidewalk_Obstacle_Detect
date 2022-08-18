@@ -19,7 +19,9 @@ from utils.tracker import Surface_tracker
 from utils.visualization import Visualizer, gen_colors
 from tracker.byte_tracker import BYTETracker, StableTracker
 
+
 cudnn.benchmark = True
+
 
 
 def detect(opt):
@@ -45,7 +47,9 @@ def detect(opt):
     # Initialize
     set_logging()
     tracker = BYTETracker(opt)
+
     stable_tracker = StableTracker()
+
 
     # Set Dataloader
     vid_path, vid_writer = None, None
@@ -112,10 +116,12 @@ def detect(opt):
 
         for i, det in enumerate(od_pred):  # detections per image
             im0 = im0s
+
             p = Path(path)  # to Path
 
             save_path = str(save_dir / p.name)  # img.jpg
             # print(f'save_path : {save_path}')
+
             if len(det):
                 print()
                 depth = torch.zeros(det.size()[0], 1).to(device)
