@@ -147,18 +147,20 @@ def detect(opt):
                     # label = f'{target.track_id}_{names[target.clss]} {target.depth}'
                     # plot_one_box(target.tlbr, im0, label=label, color=colors[int(target.clss)], line_thickness=3)
                     print(
-                        f'id:{target}, bbox: {target.tlbr}, cls: {names[target.clss]},'
-                        f' depth: {target.depth:>3.2f}, score: {target.score:>2.4f},'
+                        f'id:{target}   bbox: {target.tlbr}   cls: {names[target.clss]}  '
+                        f' depth: {target.depth:>3.2f}   score: {target.score:>2.4f}  '
                         f' clss_pool: {target.clss_pool} n: {target.n}')
                     # print(f'stable tracker : {stable_tracker}')
                 print('----------------------------------------------------')
                 stable_tracker_status = stable_tracker.update(online_to_stable)
                 for target in stable_tracker_status:
-                    label = f'{target.id}_{names[target.clss]} {target.depth:>6.2f}'
+                    label = f'{target.name}_{names[target.clss]} {target.depth:>6.2f}'
                     plot_one_box(target.tlbr, im0, label=label, color=colors[int(target.clss)], line_thickness=3)
-                    print(f'id: {target}, bbox: {target.tlbr}, cls: {names[target.clss]:^24s}, '
-                          f'depth: {target.depth:>6.2f}, score: {target.score:>6.3f}, disappear: {target.disappear}')
+                    print(f'id: {target}   bbox: {target.tlbr}   cls: {names[target.clss]:^24s}   '
+                          f'depth: {target.depth:>6.2f}   score: {target.score:>6.3f}   disappear: {target.disappear}')
             print('===============================================================================')
+            st_mean_val = (stable_tracker.sumed_value / stable_tracker.tc) if stable_tracker.tc else 0
+            print(f'mean: {st_mean_val:>8.3f}, max: {stable_tracker.maxv:>8.3f}, min: {stable_tracker.minv:>8.3f}')
             # For show streaming
             # cv2.imshow('frame', im0)
             # if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -180,12 +182,12 @@ def detect(opt):
                         save_path += '.mp4'
                     vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                 vid_writer.write(im0)
-                disappeared_track = [t for t in stable_tracker.stable_stracks if
-                                     t.is_alive and t.appeared >= 100 and not t.img_save]
-                for t in disappeared_track:
+                appeared_track = [t for t in stable_tracker.stable_stracks if
+                                     t.is_alive and t.appeared >= 100 and not t.disappear and not t.img_save]
+                for t in appeared_track:
                     t.img_save = True
                     xmin, ymin, xmax, ymax = map(int, t.tlbr)
-                    cv2.imwrite(f'{save_dir}/img/{str(t.id).zfill(4)}_{names[int(t.clss)]}.png',
+                    cv2.imwrite(f'{save_dir}/img/{str(t.name).zfill(4)}_{names[int(t.clss)]}.png',
                                 img0s[max(0, ymin):min(img0s.shape[0] - 1, ymax),
                                       max(0, xmin):min(img0s.shape[1] - 1, xmax)])
     print(f'Done. ({time.time() - t0:.3f}s)')

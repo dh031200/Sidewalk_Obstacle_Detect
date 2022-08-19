@@ -88,7 +88,6 @@ class STrack(BaseTrack):
         Update a matched track
         :type new_track: STrack
         :type frame_id: int
-        :type update_feature: bool
         :return:
         """
         self.frame_id = frame_id
@@ -275,7 +274,7 @@ class BYTETracker(object):
             det = detections[idet]
             # print(f'track.depth:{track.depth}')
             # print(f'det.depth:{det.depth}')
-            if abs(track.depth - det.depth) < 20:
+            if abs(track.depth - det.depth) < 30:
                 depth_filtered_matches.append([itracked, idet])
             else:
                 u_track.append(itracked)
@@ -372,8 +371,8 @@ class BYTETracker(object):
 
 
 class StableTrack:
-    def __init__(self, tlbr, score, clss, depth, id):
-        self.id = id
+    def __init__(self, tlbr, score, clss, depth):
+        self.name = 'unstable'
         self.count = 0
         self.tlbr = tlbr
         self.score = score
@@ -391,15 +390,23 @@ class StableTrack:
         self.appeared += 1
         self.disappear = 0
 
+        return self.appeared > 10
+
     def __repr__(self):
-        return 'OT_{:4s} ({:4d})'.format(str(self.id), self.appeared)
+        return 'OT_{:4s}({:^4d})'.format(self.name, self.appeared)
 
 
 class StableTracker:
-    def __init__(self):
+    def __init__(self, disappear_limit=150):
         self.stable_stracks = []  # type: list[StableTrack]
         self.stable_id = 0
         self.stable_cnt = 0
+        self.disappear_limit = disappear_limit
+
+        self.sumed_value = 0
+        self.tc = 0
+        self.minv = 10000
+        self.maxv = -1
 
     def update(self, online_targets):
         if self.stable_cnt:
@@ -427,15 +434,15 @@ class StableTracker:
                     print('No lt')
                     for target in ot:
                         self.stable_cnt += 1
-                        self.stable_id += 1
+                        # self.stable_id += 1
                         self.stable_stracks.append(
-                            StableTrack(target.tlwh, target.score, target.clss, target.depth, self.stable_id))
+                            StableTrack(target.tlbr, target.score, target.clss, target.depth))
 
                 if not len(ot):
                     print('No ot')
                     for track in lt:
                         track.disappear += 1
-                        if track.disappear > 30:  # disappear limit
+                        if track.disappear > self.disappear_limit:  # disappear limit
                             track.is_alive = False
                             self.stable_cnt -= 1
 
@@ -461,11 +468,17 @@ class StableTracker:
 
                     print(f'D[row]:{D[row]}')
                     print(f'D[row][col] : {D[row][col]}')
-                    # if D[row][col] > 600:
-                    #     continue
+                    self.maxv = max(self.maxv, D[row][col])
+                    self.minv = min(self.minv, D[row][col])
+                    self.sumed_value += D[row][col]
+                    self.tc += 1
+                    if D[row][col] > 60:
+                        continue
                     # print(f'D[col]:{D[col]}')
 
-                    lt[row].update(ot[col])
+                    if lt[row].update(ot[col]) and lt[row].name.isalpha():
+                        lt[row].name = str(self.stable_id)
+                        self.stable_id += 1
 
                     usedRows.add(row)
                     usedCols.add(col)
@@ -477,16 +490,16 @@ class StableTracker:
                     for row in unusedRows:
                         print(f'{lt[row]} is disappeared {lt[row].disappear}')
                         lt[row].disappear += 1
-                        if lt[row].disappear > 30:  # disappear limit
+                        if lt[row].disappear > self.disappear_limit:  # disappear limit
                             lt[row].is_alive = False
                             self.stable_cnt -= 1
                 else:
                     for col in unusedCols:
                         target = ot[col]
                         self.stable_cnt += 1
-                        self.stable_id += 1
+                        # self.stable_id += 1
                         self.stable_stracks.append(
-                            StableTrack(target.tlwh, target.score, target.clss, target.depth, self.stable_id))
+                            StableTrack(target.tlbr, target.score, target.clss, target.depth))
                         # self.register(b_data[col], s_data[col], cls_data[col], conf_data[col])
 
             ######################## Matching...
@@ -522,11 +535,11 @@ class StableTracker:
         else:
             for target in online_targets:
                 self.stable_cnt += 1
-                self.stable_id += 1
+                # self.stable_id += 1
                 self.stable_stracks.append(
-                    StableTrack(target.tlwh, target.score, target.clss, target.depth, self.stable_id))
+                    StableTrack(target.tlbr, target.score, target.clss, target.depth))
 
-        return [i for i in self.stable_stracks if i.is_alive and i.disappear == 0]
+        return [i for i in self.stable_stracks if i.is_alive and i.disappear == 0 and i.appeared >= 5]
 
 
 def joint_stracks(tlista, tlistb):
