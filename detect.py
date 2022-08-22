@@ -12,23 +12,21 @@ from tqdm import tqdm
 from models.model import Model
 from utils.datasets import LoadImages
 from utils.general import non_max_suppression, scale_coords, set_logging, increment_path, xyxy2xywh
-from utils.plots import plot_one_box
+from utils.plots import plot_one_box, warning
 from utils.classlist import get_cls_dict
 from utils.config import Config
 from utils.tracker import Surface_tracker
 from utils.visualization import Visualizer, gen_colors
 from tracker.byte_tracker import BYTETracker, StableTracker
 
-
 cudnn.benchmark = True
 
 
-
 def detect(opt):
-    source, weights, view_img, save_txt, imgsz = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+    source, view_img, save_txt, imgsz = opt.source, opt.view_img, opt.save_txt, opt.img_size
     # source, weights, view_img, imgsz = opt.source, opt.weights, opt.view_img, opt.img_size
 
-    depth_box_padding = 3
+    depth_box_padding = 10
 
     save_img = not opt.nosave and not source.endswith('.txt')
 
@@ -50,7 +48,6 @@ def detect(opt):
 
     stable_tracker = StableTracker()
 
-
     # Set Dataloader
     vid_path, vid_writer = None, None
     dataset = LoadImages(source, img_size=models.img_size, stride=models.stride)
@@ -70,7 +67,7 @@ def detect(opt):
     # For Debug
     t0 = time.time()
     cnt = 0
-    end = 1500
+    # end = 497
 
     # Loop start
     cf, pf = None, None
@@ -78,8 +75,8 @@ def detect(opt):
     for path, img, img0s, vid_cap in tqdm(dataset):
         im0s = img0s.copy()
         # cnt += 1
-        # if cnt > end:
-        #     break
+        # if cnt < end:
+        #     continue
         img = torch.from_numpy(img).to(device)
         img = img.half()
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -154,17 +151,28 @@ def detect(opt):
                 print('----------------------------------------------------')
                 stable_tracker_status = stable_tracker.update(online_to_stable)
                 for target in stable_tracker_status:
+                    if target.depth < 25:
+                        label = 'Danger!!'
+                        color = (0, 0, 255)
+                        warning(target.tlbr, im0, label=label, color=color, line_thickness=3)
+                    elif target.depth < 40:
+                        label = 'Warning!'
+                        color = (0, 165, 255)
+                        warning(target.tlbr, im0, label=label, color=color, line_thickness=3)
+                    else:
+                        color = colors[int(target.clss)]
                     label = f'{target.name}_{names[target.clss]} {target.depth:>6.2f}'
-                    plot_one_box(target.tlbr, im0, label=label, color=colors[int(target.clss)], line_thickness=3)
+                    plot_one_box(target.tlbr, im0, label=label, color=color, line_thickness=3)
                     print(f'id: {target}   bbox: {target.tlbr}   cls: {names[target.clss]:^24s}   '
                           f'depth: {target.depth:>6.2f}   score: {target.score:>6.3f}   disappear: {target.disappear}')
             print('===============================================================================')
             st_mean_val = (stable_tracker.sumed_value / stable_tracker.tc) if stable_tracker.tc else 0
             print(f'mean: {st_mean_val:>8.3f}, max: {stable_tracker.maxv:>8.3f}, min: {stable_tracker.minv:>8.3f}')
             # For show streaming
-            # cv2.imshow('frame', im0)
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     break
+            # while True:
+            #     cv2.imshow('frame', im0)
+            #     if cv2.waitKey(1) & 0xFF == ord('q'):
+            #         break
 
             # Save results (image with detections)
             if save_img:
@@ -183,13 +191,13 @@ def detect(opt):
                     vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                 vid_writer.write(im0)
                 appeared_track = [t for t in stable_tracker.stable_stracks if
-                                     t.is_alive and t.appeared >= 100 and not t.disappear and not t.img_save]
+                                  t.is_alive and t.appeared >= 100 and not t.disappear and not t.img_save]
                 for t in appeared_track:
                     t.img_save = True
                     xmin, ymin, xmax, ymax = map(int, t.tlbr)
                     cv2.imwrite(f'{save_dir}/img/{str(t.name).zfill(4)}_{names[int(t.clss)]}.png',
                                 img0s[max(0, ymin):min(img0s.shape[0] - 1, ymax),
-                                      max(0, xmin):min(img0s.shape[1] - 1, xmax)])
+                                max(0, xmin):min(img0s.shape[1] - 1, xmax)])
     print(f'Done. ({time.time() - t0:.3f}s)')
 
     return stable_tracker
@@ -197,7 +205,7 @@ def detect(opt):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='yolov7.pt', help='model.pt path(s)')
+    # parser.add_argument('--weights', nargs='+', type=str, default='yolov7.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.35, help='object confidence threshold')
@@ -218,7 +226,7 @@ if __name__ == '__main__':
     parser.add_argument("--match_thresh", type=float, default=0.90, help="matching threshold for tracking")
     parser.add_argument("--aspect_ratio_thresh", type=float, default=1.6,
                         help="threshold for filtering out boxes of which aspect ratio are above the given value.")
-    parser.add_argument('--min_box_area', type=float, default=80, help='filter out tiny boxes')
+    parser.add_argument('--min_box_area', type=float, default=120, help='filter out tiny boxes')
     parser.add_argument("--mot20", dest="mot20", default=False, action="store_true", help="test mot20.")
     args = parser.parse_args()
     print(args, '\n')
